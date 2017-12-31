@@ -1,22 +1,59 @@
+// VNode(Virtual Node)を生成する
+// VNodeは純粋なObject
+// @example
+// 子VNodeが無い例
+// h("div", {id: "app"})
+// を実行すると以下のVNodeを生成
+// {
+//   tag: "div",
+//   props: {
+//     id: "app"
+//   },
+//   children: []
+// }
+// 子VNodeがある例
+// h("div", {id: "main"}, [h("h1", {}, "Hi")])
+// を実行すると以下のVNodeを生成
+// {
+//   tag: "div",
+//   props: {
+//     id: "app"
+//   },
+//   children: [{
+//     tag: "h1",
+//     props: {},
+//     children: ["Hi"]  
+//   }]
+// }
 export function h(name, props) {
   var node
   var children = []
 
+  // 子VnodeとなるVNodeまたはVNode[]をstackに格納
+  // h関数の引数3番目以降は子VNodeをVNode，VNode[]の形式で可変長で自由に渡せる
+  // h("div", {id: "main"}, [VNode1],[VNode2])
+  // h("div", {id: "main"}, [VNode1], VNode2)
+  // はいずれも以下の記述と同じ
+  // h("div", {id: "main"}, [VNode1,VNode2])
   for (var stack = [], i = arguments.length; i-- > 2; ) {
     stack.push(arguments[i])
   }
 
   while (stack.length) {
+    // stackからpopしたものがNode[]だった場合は，Node[]の後ろの要素から順に取り出してStackにPush
     if (Array.isArray((node = stack.pop()))) {
       for (var i = node.length; i--; ) {
         stack.push(node[i])
       }
     } else if (node == null || node === true || node === false) {
     } else {
+      // 単純にNodeをchildren配列にPush
       children.push(node)
     }
   }
 
+  // h("div"...)のようにnameがelement名の時はObjectを生成
+  // TODO: nameが関数の場合を調べる．Custome elementかな．
   return typeof name === "string"
     ? {
         name: name,
@@ -26,16 +63,26 @@ export function h(name, props) {
     : name(props || {}, children)
 }
 
+// state, actions, view をcontainerにマウントする
+// @return actions
+// @example
+// app(state, actions, view, document.body)
+// state: 状態を保持する純粋なObject
+// actions: stateを変更する関数を含むObject
+// view: stateとactionを引数にVNodeを返す関数
+// contaienr: ViewをInsertする対象のDOM
 export function app(state, actions, view, container) {
   var patchLock
   var lifecycle = []
   var root = container && container.children[0]
-  var node = vnode(root, [].map)
+  var node = vnode(root, [].map) // root elementのVNodeを生成
 
+  // repaint自体は引数はないが，内部でローカル変数を参照するため，()内に参照するものを記述？
   repaint(init([], (state = copy(state)), (actions = copy(actions))))
 
   return actions
 
+  // root elementのVNodeを生成
   function vnode(element, map) {
     return (
       element && {
@@ -45,22 +92,37 @@ export function app(state, actions, view, container) {
           return element.nodeType === 3
             ? element.nodeValue
             : vnode(element, map)
-        })
+        })// element.childNodes.map(function(element){略}) と同等
       }
     )
   }
 
+  // 引数nextが渡されておらず，内部で初期化されてるので良くわからない
+  // nextは単純に変数として使われてる
   function render(next) {
+    // ロックをfalseにする
     patchLock = !patchLock
+    // view関数にstateとactionsを渡してVNodeを生成しnextに格納
     next = view(state, actions)
 
     if (container && !patchLock) {
+      // root(DOM)を更新
+      // container: Insert対象のDOM
+      // root: 現在のDOM
+      // node(oldNode): 更新前のVNode
+      // node: 更新後のVNode．appのローカル変数nodeも更新
+      //     patch(parent, element, oldNode, node, isSVG, nextSibling)
       root = patch(container, root, node, (node = next))
+      // ↑のコードは以下のコードと同等
+      // oldNode = node
+      // node = next
+      // root = patch(container, root, oldNode, node)
     }
-
+    // lifecycleからnextを取り出して，順に実行
+    // render初回実行時は lifecycleは空配列なので何もしない
     while ((next = lifecycle.pop())) next()
   }
-
+  // patchLockでロックをかけてから非同期でrenderを呼び出す
   function repaint() {
     if (!patchLock) {
       patchLock = !patchLock
@@ -68,6 +130,8 @@ export function app(state, actions, view, container) {
     }
   }
 
+  // 引数で渡したObject a,bのメンバを持つオブジェクトを生成する
+  // 同じメンバを持つときはbの値を優先
   function copy(a, b) {
     var target = {}
 
@@ -77,15 +141,26 @@ export function app(state, actions, view, container) {
     return target
   }
 
+  // targetの特定パスの値を特定の値に設定する
+  // また，sourceの持つメンバをtargetにコピーする
+  // targetとsourceで同一のメンバを持つときはtarget優先
   function set(path, value, source, target) {
-    if (path.length) {
+    if (path.length) { // [1,2,3].slice(1) => [2,3]
       target[path[0]] =
-        1 < path.length ? set(path.slice(1), value, source[path[0]], {}) : value
+        1 < path.length ? set(path.slice(1), value, source[path[0]], {}) : value // 再帰処理
       return copy(source, target)
     }
     return value
   }
 
+  // ネストされたObjectから指定されたパスのObjectを取得
+  // @params
+  // [Array] path
+  // [Object] source
+  // @example
+  // path = ["hoge","fuga"]
+  // source = {"hoge": {"fuga": "nyaan"}}
+  // get(path, source) // => "nyaan"
   function get(path, source) {
     for (var i = 0; i < path.length; i++) {
       source = source[path[i]]
@@ -93,17 +168,26 @@ export function app(state, actions, view, container) {
     return source
   }
 
+  // イマイチ何をしているのかわからない
+  // 初回に再帰的にrepaintを実行してDOMを構築している？
   function init(path, slice, actions) {
     for (var key in actions) {
+      // actionが関数の時
       typeof actions[key] === "function"
         ? (function(key, action) {
+            // actions[key]をいい感じに再定義してる
             actions[key] = function(data) {
+              // stateから指定pathのObjectを取得
               slice = get(path, state)
 
+              // オリジナルのaction関数にdataを渡して結果をdataに格納
+              // dataが関数だったら，slice(stateの一部)とactionsを引数に実行
+              // 更に結果をdataに格納?
               if (typeof (data = action(data)) === "function") {
                 data = data(slice, actions)
               }
-
+              
+              // dataがNot Null && dataがsliceと異なる && Promiseオブジェクトじゃない
               if (data && data !== slice && !data.then) {
                 repaint((state = set(path, copy(slice, data), state, {})))
               }
@@ -112,13 +196,15 @@ export function app(state, actions, view, container) {
             }
           })(key, actions[key])
         : init(
-            path.concat(key),
+            path.concat(key),// [1,2,3].concat(4) => [1,2,3,4]
             (slice[key] = slice[key] || {}),
-            (actions[key] = copy(actions[key]))
+            (actions[key] = copy(actions[key])) // actions[key] オブジェクトっぽい
           )
     }
   }
 
+  // node.props.keyを返す
+  // なかったらnull
   function getKey(node) {
     return node && node.props ? node.props.key : null
   }
@@ -215,9 +301,11 @@ export function app(state, actions, view, container) {
     }
   }
 
+  // 新しいVnodeと古いVnodeを比べて変更箇所のDOMを再描画
   function patch(parent, element, oldNode, node, isSVG, nextSibling) {
     if (node === oldNode) {
     } else if (oldNode == null) {
+      // oldNodeがなければ，現在のVnodeからDOMを構築
       element = parent.insertBefore(createElement(node, isSVG), element)
     } else if (node.name && node.name === oldNode.name) {
       updateElement(element, oldNode.props, node.props)
