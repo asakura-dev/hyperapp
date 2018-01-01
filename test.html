@@ -1,0 +1,40 @@
+
+<body>
+  <script src="https://unpkg.com/hyperapp"></script>
+  <script>
+    const {
+      h,
+      app
+    } = hyperapp
+
+    const state = {
+      hoge: {
+        count: 0
+      }
+    }
+
+    const actions = {
+      hoge: {
+        down: value => state => ({
+          count: state.count - value
+        }),
+        up: value => state => ({
+          count: state.count + value
+        })
+      }
+    }
+
+    const view = (state, actions) =>
+      h("div", {}, [
+        h("h1", {}, state.hoge.count),
+        h("button", {
+          onclick: () => actions.hoge.down(1)
+        }, "–"),
+        h("button", {
+          onclick: () => actions.hoge.up(1)
+        }, "+")
+      ])
+
+    window.main = app(state, actions, view, document.body)
+  </script>
+</body>

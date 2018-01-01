@@ -33,7 +33,7 @@ export function h(name, props) {
   // h関数の引数3番目以降は子VNodeをVNode，VNode[]の形式で可変長で自由に渡せる
   // h("div", {id: "main"}, [VNode1],[VNode2])
   // h("div", {id: "main"}, [VNode1], VNode2)
-  // はいずれも以下の記述と同じ
+  // はいずれも以下の記述と同じVNodeを生成
   // h("div", {id: "main"}, [VNode1,VNode2])
   for (var stack = [], i = arguments.length; i-- > 2; ) {
     stack.push(arguments[i])
@@ -65,16 +65,19 @@ export function h(name, props) {
 
 // state, actions, view をcontainerにマウントする
 // @return actions
+// @param {Object} state 状態を保持する純粋なObject
+// @param {Object} actions stateを変更する関数を含むObject
+// @param {Object} view stateとactionを引数にVNodeを返す関数
+// @param {Object} contaienr: ViewをInsertする対象のDOM
 // @example
+// const state = { count: 0 }
+// const actions = { up: value => state => ({ count: state.count + value }) }
+// const view = h("h1", {}, state.count)
 // app(state, actions, view, document.body)
-// state: 状態を保持する純粋なObject
-// actions: stateを変更する関数を含むObject
-// view: stateとactionを引数にVNodeを返す関数
-// contaienr: ViewをInsertする対象のDOM
 export function app(state, actions, view, container) {
   var patchLock
   var lifecycle = []
-  var root = container && container.children[0]
+  var root = container && container.children[0] //コンテナ内の子要素
   var node = vnode(root, [].map) // root elementのVNodeを生成
 
   // repaint自体は引数はないが，内部でローカル変数を参照するため，()内に参照するものを記述？
@@ -97,6 +100,7 @@ export function app(state, actions, view, container) {
     )
   }
 
+  // Vnodeを生成し，path関数でDOMを生成
   // 引数nextが渡されておらず，内部で初期化されてるので良くわからない
   // nextは単純に変数として使われてる
   function render(next) {
@@ -154,9 +158,8 @@ export function app(state, actions, view, container) {
   }
 
   // ネストされたObjectから指定されたパスのObjectを取得
-  // @params
-  // [Array] path
-  // [Object] source
+  // @param {string[]} path
+  // @param {Object} source
   // @example
   // path = ["hoge","fuga"]
   // source = {"hoge": {"fuga": "nyaan"}}
@@ -167,9 +170,14 @@ export function app(state, actions, view, container) {
     }
     return source
   }
-
-  // イマイチ何をしているのかわからない
-  // 初回に再帰的にrepaintを実行してDOMを構築している？
+  // @example
+  // path = []
+  // slice = {count: 0}
+  // actions = {
+  //   down: value => state => ({count: state.count - value}),
+  //   up: value => state => ({count: state.count + value})
+  // }
+  // init([], slice, actions)
   function init(path, slice, actions) {
     for (var key in actions) {
       // actionが関数の時
@@ -182,12 +190,12 @@ export function app(state, actions, view, container) {
 
               // オリジナルのaction関数にdataを渡して結果をdataに格納
               // dataが関数だったら，slice(stateの一部)とactionsを引数に実行
-              // 更に結果をdataに格納?
+              // オリジナルのaction関数は，valueを受け取って state => {} 関数を返す
               if (typeof (data = action(data)) === "function") {
                 data = data(slice, actions)
               }
               
-              // dataがNot Null && dataがsliceと異なる && Promiseオブジェクトじゃない
+              // dataがNot Null && dataがsliceと異なる && Promiseオブジェクトじゃない時，DOMを再描画
               if (data && data !== slice && !data.then) {
                 repaint((state = set(path, copy(slice, data), state, {})))
               }
@@ -196,9 +204,20 @@ export function app(state, actions, view, container) {
             }
           })(key, actions[key])
         : init(
+            // actionsがネストされている場合はkeyをpathに追加して，initを再実行
+            // @example
+            // actions = {
+            //   game_actions: {
+            //     start: value => state => ({...}),
+            //     stop: value => state => ({...}),
+            //   }
+            // }
+            // actions["game_actions"]は[Object]
+            // pathは [].concat("game_actions")で ["game_actions"]に
+            // slice[""]
             path.concat(key),// [1,2,3].concat(4) => [1,2,3,4]
             (slice[key] = slice[key] || {}),
-            (actions[key] = copy(actions[key])) // actions[key] オブジェクトっぽい
+            (actions[key] = copy(actions[key]))
           )
     }
   }
@@ -231,6 +250,9 @@ export function app(state, actions, view, container) {
   }
 
   function createElement(node, isSVG) {
+    // nodeがObjectでなく文字列か数字のとき，TextNodeを生成
+    // svgの要素を作るときは，createElementNSを使用 ref: https://developer.mozilla.org/ja/docs/Web/API/Document/createElementNS
+    // それ以外のときはcreateElementで要素生成
     var element =
       typeof node === "string" || typeof node === "number"
         ? document.createTextNode(node)
@@ -257,8 +279,15 @@ export function app(state, actions, view, container) {
     return element
   }
 
+  // 要素のpropsを更新する
+  // @param element 更新する要素
+  // @param oldProps 以前のprops
+  // @param props 新しいprops
   function updateElement(element, oldProps, props) {
+    // copy: oldpropsをpropsにコピー(propsになくoldPropsにだけあるpropをpropsに追加)
     for (var name in copy(oldProps, props)) {
+      // oldpropsとpropsの各propの値を比較し，異なる場合はsetElementPropで要素のpropを更新
+      // value, chekedの場合は値をDOMから取得
       if (
         props[name] !==
         (name === "value" || name === "checked"
